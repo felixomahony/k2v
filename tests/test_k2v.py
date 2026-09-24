@@ -104,6 +104,19 @@ def test_text_to_video_opening_frame(tmp_path):
     assert [(k.seconds, k.held) for k in plan.keyframes] == [(5.0, True)]
 
 
+def test_plan_paths_are_absolute(tmp_path, frame, monkeypatch):
+    monkeypatch.chdir(tmp_path)                    # relative image and out dir
+    lm = ScriptedLanguage([
+        ("render_edit", {"instruction": "x"}),
+        ("evaluate_render", {"evaluation": "ok"}),
+        ("add_keyframe", {"seconds": 2.0, "note": "n"}),
+        ("finish", {"prompt": "P"}),
+    ])
+    plan = KeyframePlanner(lm, CopyImage(), out_dir="out").plan("c", frame.name)
+    assert plan.first_frame.is_absolute()
+    assert all(k.image.is_absolute() for k in plan.keyframes)
+
+
 def test_last_turn_forces_finish(tmp_path, frame):
     lm = ScriptedLanguage([("view_image", {"index": 0})] * 3 + [("finish", {"prompt": "P"})])
     KeyframePlanner(lm, CopyImage(), out_dir=tmp_path, max_turns=4).plan("c", frame)

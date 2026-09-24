@@ -1,6 +1,6 @@
 # K2V: Keyframes to Video
 
-Video models are good at making things look right and poor at making them *happen*
+Video models are good at making things look right and poor at making them _happen_
 right: a ball that should knock a duck over rolls past it, acid poured on a sponge does
 nothing. **K2V** separates the two. A planning agent first works out what physically
 happens and draws it as a small stack of **keyframes** — photographs of the scene at the
@@ -12,20 +12,21 @@ K2V runs on [Wan2.2](https://github.com/Wan-Video/Wan2.2) (I2V-A14B or TI2V-5B) 
 fine-tuning, from an image and a caption or from a caption alone.
 
 ![K2V method overview](assets/method.png)
+
 <!-- TODO: replace assets/method.png with the method figure -->
 
 ## Results
 
-| Block dominoes | Liquid overfill | Can under vacuum | Acid on a sponge |
-|:---:|:---:|:---:|:---:|
+|              Block dominoes              |               Liquid overfill               |        Can under vacuum         |        Acid on a sponge         |
+| :--------------------------------------: | :-----------------------------------------: | :-----------------------------: | :-----------------------------: |
 | ![](assets/gallery/piq_block-domino.gif) | ![](assets/gallery/piq_liquid-overfill.gif) | ![](assets/gallery/pgb_018.gif) | ![](assets/gallery/pgb_154.gif) |
-| image to video | image to video | text to video | text to video |
+|              image to video              |               image to video                |          text to video          |          text to video          |
 
 Image-to-video examples continue from a [Physics-IQ Verified](https://huggingface.co/datasets/Anates-Labs-Research/Physics-IQ-Verified)
 starting frame. Text-to-video examples start from a [PhyGenBench](https://github.com/OpenGVLab/PhyGenBench)
-prompt alone: *"A timelapse of air being gradually and forcefully pulled out of an empty,
-thin, sealed aluminium can"* and *"A timelapse captures the reaction as concentrated
-sulfuric acid is poured onto a sponge"*.
+prompt alone: _"A timelapse of air being gradually and forcefully pulled out of an empty,
+thin, sealed aluminium can"_ and _"A timelapse captures the reaction as concentrated
+sulfuric acid is poured onto a sponge"_.
 
 ## Install
 
@@ -33,7 +34,7 @@ K2V is designed to drop into an existing Wan2.2 environment: on top of Wan's own
 requirements it needs only the Gemini SDK.
 
 ```bash
-git clone --recursive https://github.com/<org>/k2v.git && cd k2v
+git clone --recursive https://github.com/felixomahony/k2v.git && cd k2v
 # in your Wan2.2 environment (or a fresh one: pip install -r third_party/Wan2.2/requirements.txt)
 pip install -e .
 export GEMINI_API_KEY=...          # https://aistudio.google.com/apikey
@@ -75,20 +76,20 @@ video = run("A tennis ball rolls out of the pipe and hits the duck.",
 
 Each run writes to `--out` (default `outputs/k2v/`):
 
-| | |
-|---|---|
-| `video.mp4` | the result, colour-corrected |
-| `video_raw.mp4` | Wan's output before colour correction |
-| `plan.json` | the expanded caption, the keyframes (time, image, held) and the agent's transcript |
-| `keyframes/` | every render the agent made, raw and colour-matched |
+|                 |                                                                                    |
+| --------------- | ---------------------------------------------------------------------------------- |
+| `video.mp4`     | the result, colour-corrected                                                       |
+| `video_raw.mp4` | Wan's output before colour correction                                              |
+| `plan.json`     | the expanded caption, the keyframes (time, image, held) and the agent's transcript |
+| `keyframes/`    | every render the agent made, raw and colour-matched                                |
 
-| Option | Default | |
-|---|---|---|
-| `--image` | none | first frame; omit for text-to-video |
-| `--model` | `14B` | `14B` (I2V-A14B) or `5B` (TI2V-5B) |
-| `--seed` | 42 | diffusion seed |
+| Option                    | Default   |                                                    |
+| ------------------------- | --------- | -------------------------------------------------- |
+| `--image`                 | none      | first frame; omit for text-to-video                |
+| `--model`                 | `14B`     | `14B` (I2V-A14B) or `5B` (TI2V-5B)                 |
+| `--seed`                  | 42        | diffusion seed                                     |
 | `--wan-dir`, `--ckpt-dir` | submodule | an existing Wan2.2 checkout / checkpoint directory |
-| `--no-colour-correction` | off | skip the final re-grade |
+| `--no-colour-correction`  | off       | skip the final re-grade                            |
 
 ## How it works
 
@@ -122,11 +123,12 @@ video = regrade_video(video, ...)                      # re-grade each frame ont
 
 ## Hardware and cost
 
-<!-- TODO: fill from the release verification runs -->
-- **14B**: 1280×720, 81 frames. Peak GPU memory ~78 GB; ~32 min per clip on one
-  RTX PRO 6000.
+Measured on one RTX PRO 6000 (96 GB):
+
+- **14B**: 1280×720, 81 frames. Peak GPU memory ~77 GB, so an 80 GB card is the
+  minimum; ~31 min of denoising, ~34 min end to end.
 - **5B**: 1280×704, 121 frames, with model offloading. Peak GPU memory ~34 GB; ~4 min of
-  denoising, ~8 min end to end including planning, on one RTX PRO 6000.
+  denoising, ~8 min end to end including planning.
 - **Planning**: at most 24 language-model turns and 8 image edits per video.
 
 ## Using other models

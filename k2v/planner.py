@@ -63,13 +63,17 @@ class KeyframePlanner:
     def __init__(self, language: LanguageModel, image: ImageModel, *, out_dir: Path,
                  max_turns: int = 24, max_renders: int = 8, context_images: int = 3):
         self.language, self.image_model = language, image
-        self.out_dir = Path(out_dir) / "keyframes"
+        # absolute, so the paths recorded in plan.json stay valid from anywhere
+        self.out_dir = Path(out_dir).resolve() / "keyframes"
         self.max_turns, self.max_renders = max_turns, max_renders
         self.context_images = context_images
 
     def plan(self, caption: str, image: Path | None = None) -> Plan:
         self.out_dir.mkdir(parents=True, exist_ok=True)
-        session = _Session(self, Path(image) if image else None)
+        image = Path(image).resolve() if image else None
+        if image is not None and not image.is_file():
+            raise FileNotFoundError(f"input image not found: {image}")
+        session = _Session(self, image)
         brief = (PROMPTS / ("i2v.md" if image else "t2v.md")).read_text().format(
             prompt=caption, turns=self.max_turns, renders=self.max_renders,
             duration=f"{(FRAME_NUM - 1) / FPS:.2f}")
