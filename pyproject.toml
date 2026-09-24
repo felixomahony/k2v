@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "k2v"
+version = "0.1.0"
+description = "K2V: Keyframes to Video -- agent-planned keyframes for physically grounded video generation"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+# Deliberately short: torch, the video stack, opencv and imageio come from Wan2.2's
+# own requirements, so K2V installs into an existing Wan environment unchanged.
+dependencies = ["google-genai>=1.0", "numpy", "opencv-python", "pillow", "imageio"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.scripts]
+k2v = "k2v.main:cli"
+
+[tool.setuptools]
+packages = ["k2v"]
+
+[tool.setuptools.package-data]
+k2v = ["prompts/*.md"]

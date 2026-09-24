@@ -1,0 +1,2 @@
+# On top of Wan2.2's own requirements (third_party/Wan2.2/requirements.txt):
+google-genai>=1.0
