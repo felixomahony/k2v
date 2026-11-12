@@ -51,12 +51,46 @@ class Plan:
     first_frame: Path           # the input image, or the opening frame the agent drew
     keyframes: list[Keyframe]   # interior keyframes; the first frame is not repeated here
     transcript: list[str] = field(default_factory=list)
+    rest_seconds: float | None = None   # when the scene is at rest (hold.py); set by run()
 
     def save(self, path: Path) -> None:
         data = asdict(self)
         data["first_frame"] = str(self.first_frame)
         data["keyframes"] = [dict(k, image=str(k["image"])) for k in data["keyframes"]]
         path.write_text(json.dumps(data, indent=1, ensure_ascii=False))
+
+    @classmethod
+    def load(cls, path: Path) -> "Plan":
+        """Read back a plan written by `save`, or one written by hand, to skip planning.
+
+        Only `caption`, `first_frame` and `keyframes` (each with `seconds` and `image`)
+        are needed; relative paths are taken from the plan file's folder. A keyframe
+        without `held` is held when it repeats the image before it. The keyframes are
+        used as written: unlike a planned stack, nothing is added at the end, so a plan
+        that stops short of 5.0 s leaves the rest of the clip to the video model.
+        """
+        path = Path(path).resolve()
+        data = json.loads(path.read_text())
+        end = (FRAME_NUM - 1) / FPS
+
+        def resolve(p) -> Path:
+            p = Path(p).expanduser()
+            p = p if p.is_absolute() else path.parent / p
+            if not p.is_file():
+                raise FileNotFoundError(f"{path.name}: image not found: {p}")
+            return p
+
+        keyframes: list[Keyframe] = []
+        for k in data["keyframes"]:
+            image, seconds = resolve(k["image"]), float(k["seconds"])
+            if not 0 < seconds <= end:
+                raise ValueError(f"{path.name}: keyframe at {seconds}s is outside (0, {end:.2f}]")
+            if keyframes and seconds <= keyframes[-1].seconds:
+                raise ValueError(f"{path.name}: keyframes must be in increasing time order")
+            held = k.get("held", bool(keyframes) and keyframes[-1].image == image)
+            keyframes.append(Keyframe(seconds, image, k.get("note", ""), bool(held)))
+        return cls(caption=data["caption"], first_frame=resolve(data["first_frame"]),
+                   keyframes=keyframes, transcript=data.get("transcript", []))
 
 
 class KeyframePlanner:

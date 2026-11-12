@@ -7,7 +7,8 @@ shift. K2V corrects twice, with the same robust fit:
   match_keyframe  each rendered keyframe onto the reference frame (the input image, or
                   under text-to-video the opening frame the agent drew), when the drift
                   in mean grey level is large enough to matter.
-  regrade_video   each frame of the finished video back onto its frame 0.
+  regrade_video   each frame of the finished video back onto its frame 0 (and, from
+                  the plan's rest time, holds the frame -- see hold.py).
 
 The fit is a per-channel gain and offset in LAB with Huber weights. Pixels where the
 scene genuinely changed fail to fit and are down-weighted, so the correction is a
@@ -75,8 +76,13 @@ def match_keyframe(render: Path, reference: Path, out_path: Path) -> Path:
     return out_path
 
 
-def regrade_video(src: Path, out_path: Path, fps: int) -> Path:
-    """Re-grade every frame of `src` onto its frame 0 and write H.264 to `out_path`."""
+def regrade_video(src: Path, out_path: Path, fps: int, *, regrade: bool = True,
+                  hold_from: int | None = None) -> Path:
+    """Re-grade every frame of `src` onto its frame 0 and write H.264 to `out_path`.
+
+    `hold_from`, if given, repeats that (re-graded) frame to the end of the clip -- the
+    rest step in hold.py. `regrade=False` writes the frames ungraded, for a run with
+    colour correction switched off that still holds."""
     import imageio
 
     cap = cv2.VideoCapture(str(src))
@@ -86,9 +92,13 @@ def regrade_video(src: Path, out_path: Path, fps: int) -> Path:
     cap.release()
     if not frames:
         raise ValueError(f"no frames in {src}")
+    n = len(frames)
+    if hold_from is not None and hold_from < n - 1:          # frames after it are replaced
+        frames = frames[:hold_from + 1]
+    out = [_grade(f, frames[0], iterations=8) if regrade else f for f in frames]
+    out += [out[-1]] * (n - len(out))                        # ... by the held frame
     writer = imageio.get_writer(str(out_path), fps=fps, codec="libx264", quality=8)
-    for frame in frames:
-        writer.append_data(cv2.cvtColor(_grade(frame, frames[0], iterations=8),
-                                        cv2.COLOR_BGR2RGB))
+    for frame in out:
+        writer.append_data(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
     writer.close()
     return out_path

@@ -64,7 +64,27 @@ k2v --caption "A glass of water is knocked off a table edge and shatters on a ti
 
 # the smaller backbone
 k2v --model 5B --image examples/ball_and_duck.jpg --caption "..."
+
+# skip planning: generate from a saved (or hand-edited) plan
+k2v --keyframes outputs/duck/plan.json --out outputs/duck_again
 ```
+
+A plan written by hand needs only the caption, the first frame and the keyframes;
+relative paths are read from the plan's folder, and times run over (0, 5.0] s, snapping
+to every 0.25 s:
+
+```json
+{"caption": "A tennis ball rolls out of the pipe and hits the duck.",
+ "first_frame": "first.jpg",
+ "keyframes": [{"seconds": 2.0, "image": "contact.jpg"},
+               {"seconds": 5.0, "image": "rest.jpg"}]}
+```
+
+Keyframes from `--keyframes` are used as given: they are not colour-matched (the planner
+matches its own renders, saved as `*_corrected.jpg`; for new images use
+`k2v.colour.match_keyframe`), and nothing is added after the last one, so a plan that
+stops early leaves the end of the clip to Wan2.2. A keyframe that repeats the previous
+image is held unless it says `"held": false`.
 
 Or from Python:
 
@@ -76,20 +96,22 @@ video = run("A tennis ball rolls out of the pipe and hits the duck.",
 
 Each run writes to `--out` (default `outputs/k2v/`):
 
-|                 |                                                                                    |
-| --------------- | ---------------------------------------------------------------------------------- |
-| `video.mp4`     | the result, colour-corrected                                                       |
-| `video_raw.mp4` | Wan's output before colour correction                                              |
-| `plan.json`     | the expanded caption, the keyframes (time, image, held) and the agent's transcript |
-| `keyframes/`    | every render the agent made, raw and colour-matched                                |
+|                 |                                                                                                   |
+| --------------- | ------------------------------------------------------------------------------------------------- |
+| `video.mp4`     | the result, colour-corrected and held still from the plan's rest time                             |
+| `video_raw.mp4` | Wan's output before colour correction                                                             |
+| `plan.json`     | the expanded caption, the keyframes (time, image, held), the rest time and the agent's transcript |
+| `keyframes/`    | every render the agent made, raw and colour-matched                                               |
 
 | Option                    | Default   |                                                    |
 | ------------------------- | --------- | -------------------------------------------------- |
 | `--image`                 | none      | first frame; omit for text-to-video                |
+| `--keyframes`             | none      | a plan.json to generate from, skipping planning; `--caption` and `--image` override its own |
 | `--model`                 | `14B`     | `14B` (I2V-A14B) or `5B` (TI2V-5B)                 |
 | `--seed`                  | 42        | diffusion seed                                     |
 | `--wan-dir`, `--ckpt-dir` | submodule | an existing Wan2.2 checkout / checkpoint directory |
 | `--no-colour-correction`  | off       | skip the final re-grade                            |
+| `--no-hold`               | off       | do not hold the video still from the rest time     |
 
 ## How it works
 
@@ -100,7 +122,7 @@ planner = KeyframePlanner(GeminiLanguage(), GeminiImage(), out_dir=out)
 plan = planner.plan(caption, image)                    # keyframe stack + expanded caption
 wan = Wan(model, wan_dir=wan_dir, ckpt_dir=ckpt_dir)
 video = wan.generate(plan.first_frame, plan.caption, plan.keyframes, seed=seed, ...)
-video = regrade_video(video, ...)                      # re-grade each frame onto frame 0
+video = regrade_video(video, ..., hold_from=rest)      # re-grade onto frame 0; still from the rest
 ```
 
 1. **Plan** ([`planner.py`](k2v/planner.py)). An agent (Gemini 3.8 Flash) reads the
@@ -120,6 +142,10 @@ video = regrade_video(video, ...)                      # re-grade each frame ont
    held fixed during denoising ([`conditioning_5b.py`](k2v/conditioning_5b.py)). A span
    the agent marked as still is conditioned as still every second.
 4. **Re-grade** the finished video onto its first frame.
+5. **Hold** ([`hold.py`](k2v/hold.py)). From the moment the plan says the scene is at rest --
+   it ends in reused keyframes, or its last two renders are near-identical -- the video
+   repeats that frame to the end. The video model otherwise keeps drifting through a
+   span the plan describes as still.
 
 ## Hardware and cost
 

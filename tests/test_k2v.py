@@ -1,14 +1,16 @@
 """CPU-only tests: no GPU, no API key, no Wan checkpoint needed."""
 
+import json
 from pathlib import Path
 
 import cv2
 import numpy as np
 import pytest
 
-from k2v.colour import KEYFRAME_THRESHOLD, fit_gain_offset, match_keyframe
+from k2v.colour import KEYFRAME_THRESHOLD, fit_gain_offset, match_keyframe, regrade_video
+from k2v.hold import rest_frame, rest_seconds
 from k2v.models import ToolCall
-from k2v.planner import Keyframe, KeyframePlanner
+from k2v.planner import Keyframe, KeyframePlanner, Plan
 from k2v.wan import schedule, to_frames
 
 
@@ -47,6 +49,49 @@ def test_keyframe_matched_only_past_threshold(tmp_path):
                                             tmp_path / "o.png")))
         drift = abs(out.astype(float).mean() - ref.mean())
         assert (drift < shift / 4) == should_change
+
+
+# -- hold at rest --------------------------------------------------------------------
+
+def test_rest_declared_by_held_keyframes(tmp_path):
+    a, b = tmp_path / "a.png", tmp_path / "b.png"
+    keys = [Keyframe(0.5, b), Keyframe(1.25, a), Keyframe(5.0, a, held=True)]
+    assert rest_seconds(keys) == (1.25, "declared")
+    # a held span in the middle that is followed by more motion is not a rest
+    assert rest_seconds([Keyframe(1.0, a), Keyframe(2.0, a, held=True), Keyframe(5.0, b)])[1] != "declared"
+
+
+def test_rest_inferred_from_near_identical_renders(tmp_path):
+    rng = np.random.default_rng(2)
+    img = rng.integers(30, 220, (270, 480, 3), dtype=np.uint8)
+    cv2.imwrite(str(tmp_path / "a.png"), img)
+    cv2.imwrite(str(tmp_path / "b.png"), np.clip(img.astype(int) + 2, 0, 255).astype(np.uint8))
+    cv2.imwrite(str(tmp_path / "c.png"), 255 - img)
+    a, b, c = (tmp_path / f"{x}.png" for x in "abc")
+    assert rest_seconds([Keyframe(1.5, a), Keyframe(5.0, b)]) == (1.5, "inferred")
+    assert rest_seconds([Keyframe(1.5, a), Keyframe(5.0, c)]) == (None, None)
+
+
+def test_rest_frame_per_backbone():
+    assert rest_frame(1.25, 16) == 20 and rest_frame(1.25, 24) == 32     # as wan.to_frames
+    assert rest_frame(0.0, 24) == 0
+
+
+def test_video_held_from_rest_frame(tmp_path):
+    import imageio
+    src, out = tmp_path / "raw.mp4", tmp_path / "held.mp4"
+    w = imageio.get_writer(str(src), fps=16, codec="libx264", quality=8)
+    for t in range(12):                       # a bright square sliding to the right
+        f = np.full((64, 128, 3), 40, np.uint8); f[20:40, 8 * t:8 * t + 16] = 230
+        w.append_data(f)
+    w.close()
+    regrade_video(src, out, fps=16, regrade=False, hold_from=5)
+    cap, got = cv2.VideoCapture(str(out)), []
+    while (r := cap.read())[0]:
+        got.append(r[1].astype(float))
+    assert len(got) == 12
+    assert max(np.abs(f - got[5]).mean() for f in got[6:]) < 1.0         # still from frame 5
+    assert np.abs(got[4] - got[5]).mean() > 3.0                          # moving before it
 
 
 # -- planner loop --------------------------------------------------------------------
@@ -121,3 +166,35 @@ def test_last_turn_forces_finish(tmp_path, frame):
     lm = ScriptedLanguage([("view_image", {"index": 0})] * 3 + [("finish", {"prompt": "P"})])
     KeyframePlanner(lm, CopyImage(), out_dir=tmp_path, max_turns=4).plan("c", frame)
     assert lm.offered[-1] == (["finish"], ["finish"])
+
+
+# -- loading a plan instead of planning --------------------------------------------
+
+def test_saved_plan_round_trips(tmp_path, frame):
+    lm = ScriptedLanguage([
+        ("render_edit", {"instruction": "x"}),
+        ("evaluate_render", {"evaluation": "ok"}),
+        ("add_keyframe", {"seconds": 2.0, "note": "n"}),
+        ("finish", {"prompt": "P"}),
+    ])
+    plan = KeyframePlanner(lm, CopyImage(), out_dir=tmp_path).plan("c", frame)
+    plan.save(tmp_path / "plan.json")
+    loaded = Plan.load(tmp_path / "plan.json")
+    assert (loaded.caption, loaded.first_frame) == (plan.caption, plan.first_frame)
+    assert loaded.keyframes == plan.keyframes
+
+
+def test_hand_written_plan(tmp_path, frame):
+    (tmp_path / "kf.jpg").write_bytes(frame.read_bytes())
+    (tmp_path / "plan.json").write_text(json.dumps({
+        "caption": "C", "first_frame": frame.name,           # relative to the plan file
+        "keyframes": [{"seconds": 2.0, "image": "kf.jpg"},
+                      {"seconds": 5.0, "image": "kf.jpg"}]}))
+    plan = Plan.load(tmp_path / "plan.json")
+    assert plan.first_frame == frame.resolve()
+    assert [(k.seconds, k.held) for k in plan.keyframes] == [(2.0, False), (5.0, True)]
+    (tmp_path / "bad.json").write_text(json.dumps({
+        "caption": "C", "first_frame": frame.name,
+        "keyframes": [{"seconds": 0.0, "image": "kf.jpg"}]}))
+    with pytest.raises(ValueError):
+        Plan.load(tmp_path / "bad.json")
